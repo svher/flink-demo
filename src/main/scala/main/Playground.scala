@@ -114,6 +114,14 @@ object Playground {
      */
 
     sensorData
+      .map(v => (v.id, v.temperature))
+      .keyBy(_._1)
+      .process(new CountWithTimeoutFunction)
+      .print
+
+    /*
+    Flink Join
+    sensorData
       .filter(_.id == "sensor_4")
       .join(sensorData)
       .where(elem => elem.id)
@@ -122,6 +130,7 @@ object Playground {
       .apply ((e1, e2) =>  (e1.id, e1.temperature, e2.temperature))
       .filter(v => v._2 > v._3)
       .print
+     */
 
     /*
     keyedStream

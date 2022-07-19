@@ -23,7 +23,7 @@ class SensorSource extends RichParallelSourceFunction[SensorReading] {
       if (rand.nextFloat() < 0.001) {
         curTime -= Duration.ofSeconds(100).toMillis
       }
-      curFTemp.foreach(t => ctx.collect(SensorReading(t._1, curTime, t._2)))
+      curFTemp.foreach(t => if (rand.nextFloat() < 0.5) ctx.collect(SensorReading(t._1, curTime, t._2)))
       Thread.sleep(100)
     }
   }
