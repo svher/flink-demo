@@ -25,5 +25,4 @@ lazy val root = (project in file("."))
     inThisBuild(List())
   )
 
-
 Compile / mainClass := Some("main.Playground")

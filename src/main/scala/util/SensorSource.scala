@@ -2,6 +2,7 @@ package util
 
 import org.apache.flink.streaming.api.functions.source.{RichParallelSourceFunction, SourceFunction}
 
+import java.time.Duration
 import java.util.Calendar
 import scala.util.Random
 
@@ -18,7 +19,10 @@ class SensorSource extends RichParallelSourceFunction[SensorReading] {
 
     while (running) {
       curFTemp = curFTemp.map(t => (t._1, t._2 + (rand.nextGaussian() * 0.5)))
-      val curTime = Calendar.getInstance.getTimeInMillis
+      var curTime = Calendar.getInstance.getTimeInMillis
+      if (rand.nextFloat() < 0.001) {
+        curTime -= Duration.ofSeconds(100).toMillis
+      }
       curFTemp.foreach(t => ctx.collect(SensorReading(t._1, curTime, t._2)))
       Thread.sleep(100)
     }

@@ -1,14 +1,15 @@
 package main
 
-import org.apache.flink.api.common.eventtime.{SerializableTimestampAssigner, Watermark, WatermarkStrategy}
+import org.apache.flink.api.common.eventtime.{SerializableTimestampAssigner, WatermarkStrategy}
 import org.apache.flink.api.common.functions.RichFlatMapFunction
-import org.apache.flink.api.common.state.{MapStateDescriptor, StateTtlConfig, ValueState, ValueStateDescriptor}
+import org.apache.flink.api.common.state.{StateTtlConfig, ValueState, ValueStateDescriptor}
 import org.apache.flink.api.common.time.Time
-import org.apache.flink.api.common.typeinfo.BasicTypeInfo
-import org.apache.flink.api.scala.{createTypeInformation, scalaNothingTypeInfo}
+import org.apache.flink.api.scala.createTypeInformation
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.functions.ProcessFunction
-import org.apache.flink.streaming.api.scala.{DataStream, OutputTag, StreamExecutionEnvironment}
+import org.apache.flink.streaming.api.scala.{OutputTag, StreamExecutionEnvironment}
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
+import org.apache.flink.streaming.api.windowing.time.{Time => wTime}
 import org.apache.flink.util.Collector
 import util.{SensorReading, SensorSource}
 
@@ -62,11 +63,14 @@ object Playground {
   }
 
   private val machine = new OutputTag[SensorReading]("MACHINE")
+  private val late = new OutputTag[SensorReading]("LATE")
 
   def main(args: Array[String]): Unit = {
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     // placeholder syntax
     // env.fromElements((1L, 1L), (1L, 5L), (1L, 7L), (1L, 4L), (1L, 3L), (1L, 9L)).keyBy(_._1).flatMap(new CountWindowAverage).print()
+
+    println(env.getParallelism)
 
     val strategy = WatermarkStrategy
       // BoundedOutOfOrderlessWatermarks generate watermarks onPeriodicEmit
@@ -81,12 +85,65 @@ object Playground {
       .addSource(new SensorSource)
       .assignTimestampsAndWatermarks(strategy)
 
+    val keyedStream = sensorData.keyBy(_.id)
+
     val multiOutputStream = sensorData.process((value: SensorReading, ctx: ProcessFunction[SensorReading, SensorReading]#Context, out: Collector[SensorReading]) =>
       if (value.id equals "sensor_13") {
         ctx.output(machine, value)
       })
 
-    multiOutputStream.getSideOutput(machine).print()
+    /*
+    keyedStream
+      .window(TumblingEventTimeWindows.of(wTime.seconds(10)))
+      .reduce((r1: SensorReading, r2: SensorReading) => if (r1.temperature > r2.temperature) r2 else r1,
+        (key: String, window: TimeWindow, elements: Iterable[SensorReading], out: Collector[(Long, SensorReading)]) => {
+          val min = elements.iterator.next()
+          out.collect((window.getStart, min))
+        }).print()
+     */
+
+    val windowStream = keyedStream
+      .window(TumblingEventTimeWindows.of(wTime.seconds(10)))
+      .sideOutputLateData(late)
+      .aggregate(new AverageAggregate, new AverageProcessWindowFunction)
+
+    /*
+    windowStream
+      .getSideOutput(late)
+      .map(v => "Detected late element: " + v.id + " at " + v.timestamp)
+     */
+
+    sensorData
+      .filter(_.id == "sensor_4")
+      .join(sensorData)
+      .where(elem => elem.id)
+      .equalTo(elem => elem.id)
+      .window(TumblingEventTimeWindows.of(wTime.seconds(10)))
+      .apply ((e1, e2) =>  (e1.id, e1.temperature, e2.temperature))
+      .filter(v => v._2 > v._3)
+      .print
+
+    /*
+    keyedStream
+      .window(TumblingEventTimeWindows.of(wTime.seconds(10)))
+//      .reduce((v1, v2) => SensorReading(v1.id, v1.timestamp, (v1.temperature + v2.temperature) / 2))
+      .aggregate(new AverageAggregate)
+      .print()
+      */
+
+    /*
+    keyedStream
+      .window(TumblingEventTimeWindows.of(wTime.seconds(10), wTime.seconds(5)))
+      .process(new MyProcessWindowFunction)
+      .print()
+     */
+
+    /*
+    sensorData
+      .windowAll(TumblingEventTimeWindows.of(wTime.seconds(10)))
+      .process(new MyProcessAllWindowFunction)
+      .print()
+     */
 
     env.execute()
   }
