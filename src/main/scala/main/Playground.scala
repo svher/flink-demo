@@ -1,17 +1,24 @@
 package main
 
+import org.apache.flink.api.common.eventtime.{SerializableTimestampAssigner, Watermark, WatermarkStrategy}
 import org.apache.flink.api.common.functions.RichFlatMapFunction
-import org.apache.flink.api.common.state.{StateTtlConfig, ValueState, ValueStateDescriptor}
+import org.apache.flink.api.common.state.{MapStateDescriptor, StateTtlConfig, ValueState, ValueStateDescriptor}
 import org.apache.flink.api.common.time.Time
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo
 import org.apache.flink.api.scala.{createTypeInformation, scalaNothingTypeInfo}
 import org.apache.flink.configuration.Configuration
-import org.apache.flink.streaming.api.scala.{DataStream, StreamExecutionEnvironment}
+import org.apache.flink.streaming.api.functions.ProcessFunction
+import org.apache.flink.streaming.api.scala.{DataStream, OutputTag, StreamExecutionEnvironment}
 import org.apache.flink.util.Collector
+import util.{SensorReading, SensorSource}
 
+import java.time.Duration
 import scala.collection.mutable.ArrayBuffer
 
 class CountWindowAverage extends RichFlatMapFunction[(Long, Long), (Long, Long)] {
+  // _ as default value
   private var sum: ValueState[(Long, Long)] = _
+
   override def flatMap(input: (Long, Long), out: Collector[(Long, Long)]): Unit = {
     val tmpCurrentSum = sum.value
 
@@ -46,27 +53,42 @@ class CountWindowAverage extends RichFlatMapFunction[(Long, Long), (Long, Long)]
   }
 }
 
-object playground {
+class Rule {}
+
+object Playground {
   def show(x: Option[String]): String = x match {
     case Some(s) => s
     case None => "?"
   }
 
+  private val machine = new OutputTag[SensorReading]("MACHINE")
+
   def main(args: Array[String]): Unit = {
-    val longest = longestWord("The quick brown fox".split(" "))
-    println(longest._1)
-
-    val wc = WC("ab", 1)
-
-    val capitals = Map("France" -> "Paris", "Japan" -> "Tokyo")
-
-    println(show(capitals.get("A")))
-
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     // placeholder syntax
-    env.fromElements((1L, 1L), (1L, 5L), (1L, 7L), (1L, 4L), (1L, 3L), (1L, 9L)).keyBy(_._1).flatMap(new CountWindowAverage).print()
-    env.execute()
+    // env.fromElements((1L, 1L), (1L, 5L), (1L, 7L), (1L, 4L), (1L, 3L), (1L, 9L)).keyBy(_._1).flatMap(new CountWindowAverage).print()
 
+    val strategy = WatermarkStrategy
+      // BoundedOutOfOrderlessWatermarks generate watermarks onPeriodicEmit
+      // note an excessive number of watermarks degrades performance
+      .forBoundedOutOfOrderness(Duration.ofSeconds(20))
+      .withTimestampAssigner(new SerializableTimestampAssigner[SensorReading] {
+        override def extractTimestamp(element: SensorReading, recordTimestamp: Long): Long = element.timestamp
+      })
+      .withIdleness(Duration.ofSeconds(10))
+
+    val sensorData = env
+      .addSource(new SensorSource)
+      .assignTimestampsAndWatermarks(strategy)
+
+    val multiOutputStream = sensorData.process((value: SensorReading, ctx: ProcessFunction[SensorReading, SensorReading]#Context, out: Collector[SensorReading]) =>
+      if (value.id equals "sensor_13") {
+        ctx.output(machine, value)
+      })
+
+    multiOutputStream.getSideOutput(machine).print()
+
+    env.execute()
   }
 
   def curriedSum(x: Int)(y: Int): Int = x + y
@@ -86,17 +108,24 @@ object playground {
 
 abstract class IntQueue {
   def get(): Int
+
   def put(x: Int): Unit
 }
 
 class BasicIntQueue extends IntQueue {
   private val buf = new ArrayBuffer[Int]
+
   def get(): Int = buf.remove(0)
-  def put(x: Int): Unit = { buf += x }
+
+  def put(x: Int): Unit = {
+    buf += x
+  }
 }
 
 trait Doubling extends IntQueue {
-  abstract override def put(x: Int): Unit = { super.put(2 * x) }
+  abstract override def put(x: Int): Unit = {
+    super.put(2 * x)
+  }
 }
 
 class MyQueue extends BasicIntQueue with Doubling

@@ -3,6 +3,9 @@ package learn
 object ch20 {
   def main(args: Array[String]): Unit = {
     println(new RationalClass(1, 2))
+
+    val s = Seq(1, 2, 3)
+    println(4 +: s)
   }
 }
 
