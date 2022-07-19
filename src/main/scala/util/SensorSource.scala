@@ -13,8 +13,8 @@ class SensorSource extends RichParallelSourceFunction[SensorReading] {
     val rand = new Random()
     val taskIdx = this.getRuntimeContext.getIndexOfThisSubtask
 
-    var curFTemp = (1 to 10).map {
-      i => ("sensor_" + (taskIdx * 10 + i), 65 + (rand.nextGaussian() * 20))
+    var curFTemp = (1 to 1).map {
+      i => ("sensor_" + taskIdx, 65 + (rand.nextGaussian() * 20))
     }
 
     while (running) {

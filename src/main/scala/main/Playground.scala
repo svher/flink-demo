@@ -2,7 +2,7 @@ package main
 
 import org.apache.flink.api.common.eventtime.{SerializableTimestampAssigner, WatermarkStrategy}
 import org.apache.flink.api.common.functions.RichFlatMapFunction
-import org.apache.flink.api.common.state.{StateTtlConfig, ValueState, ValueStateDescriptor}
+import org.apache.flink.api.common.state.{MapStateDescriptor, StateTtlConfig, ValueState, ValueStateDescriptor}
 import org.apache.flink.api.common.time.Time
 import org.apache.flink.api.scala.createTypeInformation
 import org.apache.flink.configuration.Configuration
@@ -54,8 +54,6 @@ class CountWindowAverage extends RichFlatMapFunction[(Long, Long), (Long, Long)]
   }
 }
 
-class Rule {}
-
 object Playground {
   def show(x: Option[String]): String = x match {
     case Some(s) => s
@@ -67,10 +65,11 @@ object Playground {
 
   def main(args: Array[String]): Unit = {
     val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.enableCheckpointing(10000)
     // placeholder syntax
     // env.fromElements((1L, 1L), (1L, 5L), (1L, 7L), (1L, 4L), (1L, 3L), (1L, 9L)).keyBy(_._1).flatMap(new CountWindowAverage).print()
 
-    println(env.getParallelism)
+    println("Current parallelism: " + env.getParallelism)
 
     val strategy = WatermarkStrategy
       // BoundedOutOfOrderlessWatermarks generate watermarks onPeriodicEmit
@@ -86,6 +85,13 @@ object Playground {
       .assignTimestampsAndWatermarks(strategy)
 
     val keyedStream = sensorData.keyBy(_.id)
+
+    val thresholds = env.fromElements(ThresholdUpdate("sensor_1", 1.5))
+
+    val alerts = keyedStream
+      .connect(thresholds.broadcast(UpdatableTemperatureAlertFunction.thresholdStateDescriptor))
+      .process(new UpdatableTemperatureAlertFunction)
+      .print
 
     val multiOutputStream = sensorData.process((value: SensorReading, ctx: ProcessFunction[SensorReading, SensorReading]#Context, out: Collector[SensorReading]) =>
       if (value.id equals "sensor_13") {
@@ -113,11 +119,13 @@ object Playground {
       .map(v => "Detected late element: " + v.id + " at " + v.timestamp)
      */
 
+    /*
     sensorData
       .map(v => (v.id, v.temperature))
       .keyBy(_._1)
       .process(new CountWithTimeoutFunction)
       .print
+     */
 
     /*
     Flink Join
